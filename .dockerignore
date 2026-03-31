@@ -1,0 +1,14 @@
+.git
+.gitignore
+.DS_Store
+*.md
+!README.md
+LICENSE
+.idea/
+.vscode/
+tmp/
+temp/
+*.log
+__pycache__/
+.venv/
+venv/
