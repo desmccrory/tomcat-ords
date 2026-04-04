@@ -4,25 +4,60 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Overview
 
- Project firstly to create a docker image containing latest Apache Tomcat app and latest Oracle ORDS App in readiness to configure and deploy combined solution.
- Secondly to document and configure deployment steps
+Docker image combining Apache Tomcat 9 with Oracle REST Data Services (ORDS) 25.4 and APEX static images. Multi-stage build using Oracle's official ORDS container image as source, deployed onto a Tomcat 9 + JDK 17 base.
 
- Source base image from  container-registry.oracle.com
- eg docker pull container-registry.oracle.com/database/ords:latest
- refer https://container-registry.oracle.com/ords/ocr/ba/database/ords
+## Architecture
 
-## Background
+- **Stage 1**: Extracts ORDS WAR, CLI, SQLcl from `container-registry.oracle.com/database/ords:latest`
+- **Stage 2**: Builds on `tomcat:9-jdk17-temurin`, deploys ords.war to Tomcat webapps
+- APEX static images extracted from `apex-latest.zip` into `/i` context
+- ORDS config linked via `-Dconfig.url=/etc/ords/config` in `setenv.sh`
+- Tomcat 9 required (not 10+) because ORDS 25.4 uses `javax.servlet`
 
-Reference guide
-https://oracle-base.com/articles/misc/oracle-rest-data-services-ords-installation-on-tomcat-22-onward
-ORDS Installation guide
-https://docs.oracle.com/en/database/oracle/oracle-rest-data-services/25.4/ordig/installing-and-configuring-oracle-rest-data-services.html#GUID-B6661F35-3EE3-4CB3-9379-40D0B8E24635
-Tomcat Installation guide
-https://docs.oracle.com/en/database/oracle/oracle-rest-data-services/25.4/ordig/deploying-and-monitoring-oracle-rest-data-services.html#GUID-3F2AE730-69D0-4A64-A13A-76745B7467CD
+## Key Files
 
-See also sample project at folder /Users/dmccrory/Documents/Projects/tomcat-ords-image
+- `Dockerfile` - Multi-stage build definition
+- `entrypoint.sh` - ORDS initial config + Tomcat startup
+- `setenv.sh` - Tomcat JVM options (heap, timezone, config.url)
+- `buildContainerImage.sh` - Build helper (Docker/Podman, proxy support)
+- `apex-latest.zip` - APEX distribution (not in git, required for build)
 
-plan first, then build then test
-use git and github to manage project source. Use primarily bash scripting and linux commands with python as and when required
-Ask question if there are options or you need clarification
+## Common Commands
 
+```bash
+# Build
+./buildContainerImage.sh
+# or
+docker build -t tomcat-ords:latest .
+
+# Run
+docker run -p 8080:8080 \
+  -e ORACLE_HOST=<db_host> \
+  -e ORACLE_PWD=<sys_password> \
+  -e ORACLE_SERVICE=<service_name> \
+  -v ords-config:/etc/ords/config \
+  tomcat-ords:latest
+
+# Verify
+curl http://localhost:8080/ords/
+```
+
+## Prerequisites
+
+- `apex-latest.zip` must be downloaded from Oracle and placed in project root
+- Docker login to `container-registry.oracle.com` required for ORDS base image
+
+## Reference Guides
+
+- https://oracle-base.com/articles/misc/oracle-rest-data-services-ords-installation-on-tomcat-22-onward
+- https://docs.oracle.com/en/database/oracle/oracle-rest-data-services/25.4/ordig/installing-and-configuring-oracle-rest-data-services.html
+- https://docs.oracle.com/en/database/oracle/oracle-rest-data-services/25.4/ordig/deploying-and-monitoring-oracle-rest-data-services.html
+
+See also sample standalone project at `/Users/dmccrory/Documents/Projects/tomcat-ords-image`
+
+## Working Preferences
+
+- Plan first, then build, then test
+- Use git and GitHub to manage project source
+- Use primarily bash scripting and Linux commands with Python as needed
+- Ask questions if there are options or clarification is needed

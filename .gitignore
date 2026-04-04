@@ -6,6 +6,12 @@
 # Docker
 .docker/
 
+# Environment secrets
+.env
+
+# TLS keystores and certificates
+tls/
+
 # IDE
 .idea/
 .vscode/

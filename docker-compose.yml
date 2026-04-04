@@ -1,0 +1,36 @@
+services:
+  ords:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        ORDS_IMAGE: container-registry.oracle.com/database/ords:latest
+        TLS_KEYSTORE_PASS: ${TLS_KEYSTORE_PASS:-changeit}
+    image: tomcat-ords:latest
+    container_name: tomcat-ords
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+      - "8443:8443"
+    volumes:
+      - /tmp/docker/containers/ords/ords_config:/etc/ords/config
+      - /tmp/docker/containers/ords/apex:/opt/oracle/apex
+      - /tmp/docker/export:/export
+      - /etc/timezone:/etc/timezone:ro
+      # Uncomment to enable TLS (also set ENABLE_TLS=true in .env)
+      # - ./tls/keystore.p12:/usr/local/tomcat/conf/tls/keystore.p12:ro
+    networks:
+      - ords-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fk", "https://localhost:8443/ords/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+networks:
+  ords-net:
+    name: ords-net
+    driver: bridge

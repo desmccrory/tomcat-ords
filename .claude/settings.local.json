@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker run:*)",
+      "Bash(docker stop:*)",
+      "Bash(docker build:*)",
+      "Bash(mkdir -p /tmp/docker/containers/ords/apex /tmp/docker/containers/ords/ords_config /tmp/docker/export)",
+      "Read(//private/tmp/**)",
+      "Bash(unzip -qo /Users/dmccrory/Documents/Projects/tomcat-ords/apex-latest.zip \"apex/images/*\")",
+      "Bash(mv /tmp/apex/images /tmp/docker/containers/ords/apex/images)",
+      "Bash(rm -rf /tmp/apex /tmp/META-INF)"
+    ]
+  }
+}
