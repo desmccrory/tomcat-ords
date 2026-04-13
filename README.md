@@ -19,7 +19,7 @@ Docker image combining Apache Tomcat 9 with Oracle REST Data Services (ORDS) 25.
 │  │              images (APEX static files)     │  │
 │  └────────────────────────────────────────────┘  │
 │                                                  │
-│  Ports: 8080 (HTTP) / 8443 (HTTPS/TLS)          │
+│  Ports: 8080 (HTTP) / 8443 (HTTPS, optional)    │
 │                                                  │
 │  /opt/oracle/ords/bin/ords   ─── ORDS CLI        │
 │  /opt/oracle/sqlcl/bin/sql   ─── SQLcl           │
@@ -40,7 +40,7 @@ Docker image combining Apache Tomcat 9 with Oracle REST Data Services (ORDS) 25.
 The image is built using a multi-stage Dockerfile:
 
 1. **Stage 1** extracts `ords.war`, the ORDS CLI, and SQLcl from a locally-pulled Oracle ORDS container image
-2. **Stage 2** builds the final image on `tomcat:9-jdk17-temurin`, deploys the WAR, configures TLS, and symlinks APEX images from a volume mount
+2. **Stage 2** builds the final image on `tomcat:9-jdk17-temurin`, deploys the WAR, and symlinks APEX images from a volume mount
 
 Tomcat 9 is used because ORDS 25.4 depends on `javax.servlet` (Tomcat 10+ uses the incompatible `jakarta.servlet` namespace).
 
@@ -61,10 +61,6 @@ Tomcat 9 is used because ORDS 25.4 depends on `javax.servlet` (Tomcat 10+ uses t
   mv /tmp/apex/images /tmp/docker/containers/ords/apex/images
   rm -rf /tmp/apex
   ```
-- **TLS keystore** — generate a self-signed cert for testing:
-  ```bash
-  ./generate-self-signed-cert.sh
-  ```
 
 ## Build
 
@@ -77,9 +73,7 @@ Using the build script:
 Or directly with Docker:
 
 ```bash
-docker build -t tomcat-ords:latest \
-  --build-arg TLS_KEYSTORE=tls/keystore.p12 \
-  --build-arg TLS_KEYSTORE_PASS=changeit .
+docker build -t tomcat-ords:latest .
 ```
 
 Build script options:
@@ -96,8 +90,7 @@ Build arguments:
 | Arg | Default | Description |
 |-----|---------|-------------|
 | `ORDS_IMAGE` | `container-registry.oracle.com/database/ords:latest` | Source ORDS image (must exist locally) |
-| `TLS_KEYSTORE` | `tls/keystore.p12` | Path to PKCS12 keystore |
-| `TLS_KEYSTORE_PASS` | `changeit` | Keystore password |
+| `TLS_KEYSTORE_PASS` | `changeit` | Keystore password (used when TLS is enabled at runtime) |
 
 ## Run
 
@@ -109,7 +102,20 @@ docker compose up -d    # build + run
 docker compose logs -f  # watch startup
 ```
 
-### Basic docker run
+### Basic docker run (HTTP only)
+
+```bash
+docker run -p 8080:8080 \
+  -v /tmp/docker/containers/ords/ords_config:/etc/ords/config \
+  -v /tmp/docker/containers/ords/apex:/opt/oracle/apex \
+  -v /tmp/docker/export:/export \
+  -v /etc/timezone:/etc/timezone:ro \
+  -e ORACLE_HOST=mydbhost \
+  -e ORACLE_PWD=mysyspassword \
+  tomcat-ords:latest
+```
+
+### With TLS enabled
 
 ```bash
 docker run -p 8080:8080 -p 8443:8443 \
@@ -117,15 +123,17 @@ docker run -p 8080:8080 -p 8443:8443 \
   -v /tmp/docker/containers/ords/apex:/opt/oracle/apex \
   -v /tmp/docker/export:/export \
   -v /etc/timezone:/etc/timezone:ro \
+  -v ./tls/keystore.p12:/usr/local/tomcat/conf/tls/keystore.p12:ro \
   -e ORACLE_HOST=mydbhost \
   -e ORACLE_PWD=mysyspassword \
+  -e ENABLE_TLS=true \
   -e TLS_KEYSTORE_PASS=changeit \
   tomcat-ords:latest
 ```
 
 Access ORDS at:
 - HTTP: `http://localhost:8080/ords/`
-- HTTPS: `https://localhost:8443/ords/`
+- HTTPS: `https://localhost:8443/ords/` (when TLS enabled)
 
 ## Environment Variables
 
@@ -156,11 +164,16 @@ Access ORDS at:
 | `FEATURE_REST_APEX` | `false` | APEX RESTful Services |
 | `FEATURE_PLSQL_GATEWAY` | `false` | PL/SQL Gateway |
 
-### TLS
+### TLS (optional)
+
+TLS is disabled by default. Enable it by setting `ENABLE_TLS=true` and mounting a PKCS12 keystore.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `ENABLE_TLS` | `false` | Set to `true` to enable HTTPS on port 8443 |
 | `TLS_KEYSTORE_PASS` | `changeit` | PKCS12 keystore password |
+
+When TLS is enabled, the entrypoint validates that a keystore exists at `/usr/local/tomcat/conf/tls/keystore.p12` and activates the HTTPS connector. When disabled, only the HTTP connector on port 8080 is active.
 
 ## Volumes
 
@@ -170,10 +183,17 @@ Access ORDS at:
 | `/tmp/docker/containers/ords/apex` | `/opt/oracle/apex` | rw | APEX distribution (images served at `/i`) |
 | `/tmp/docker/export` | `/export` | rw | Export/scratch space |
 | `/etc/timezone` | `/etc/timezone` | ro | Host timezone |
+| `./tls/keystore.p12` | `/usr/local/tomcat/conf/tls/keystore.p12` | ro | TLS keystore (optional, only when `ENABLE_TLS=true`) |
 
 ## TLS / HTTPS
 
-The image includes a custom Tomcat `server.xml` with an HTTPS connector on port 8443 using a PKCS12 keystore.
+TLS is optional. The image ships with two Tomcat server configurations (`server-http.xml` and `server-tls.xml`), and the entrypoint selects the appropriate one at runtime based on the `ENABLE_TLS` environment variable.
+
+### Enabling TLS
+
+1. Generate or provide a PKCS12 keystore
+2. Set `ENABLE_TLS=true` in `.env`
+3. Mount the keystore into the container (uncomment the volume in `docker-compose.yml`)
 
 ### Self-signed certificate (development/testing)
 
@@ -196,25 +216,27 @@ openssl pkcs12 -export \
   -passout pass:yourpassword
 ```
 
-Then build with `--build-arg TLS_KEYSTORE=tls/keystore.p12 --build-arg TLS_KEYSTORE_PASS=yourpassword`.
+Then set `ENABLE_TLS=true` and `TLS_KEYSTORE_PASS=yourpassword` in `.env`, and mount the keystore.
 
 ## Startup Behaviour
 
 On first run (no existing config at `/etc/ords/config`):
 
-1. Waits for the database to be reachable (retries configurable via `DB_WAIT_RETRY`)
-2. Validates `ORACLE_PWD` is set (auto-generates `ORDS_PWD` if not provided)
-3. Runs `ords install` to configure the database connection and create ORDS schemas
-4. Applies feature flags (APEX REST services, PL/SQL Gateway)
-5. Runs any custom init scripts from `/ords-entrypoint.d/*.sh`
-6. If `CONTEXT_ROOT` differs from `ords`, renames the WAR file
-7. Starts Tomcat in the foreground with graceful shutdown handling
+1. Selects HTTP-only or HTTP+TLS server config based on `ENABLE_TLS`
+2. Renames WAR file if `CONTEXT_ROOT` differs from `ords`
+3. Waits for the database to be reachable (retries configurable via `DB_WAIT_RETRY`)
+4. Validates `ORACLE_PWD` is set (auto-generates `ORDS_PWD` if not provided)
+5. Runs `ords install` to configure the database connection and create ORDS schemas
+6. Applies feature flags (APEX REST services, PL/SQL Gateway)
+7. Runs any custom init scripts from `/ords-entrypoint.d/*.sh`
+8. Starts Tomcat in the foreground with graceful shutdown handling (SIGTERM/SIGINT)
 
 On subsequent runs (existing config found):
 
-1. Skips ORDS installation
-2. Runs any custom init scripts from `/ords-entrypoint.d/*.sh`
-3. Starts Tomcat immediately using the persisted configuration
+1. Selects server config based on `ENABLE_TLS`
+2. Skips ORDS installation
+3. Runs any custom init scripts from `/ords-entrypoint.d/*.sh`
+4. Starts Tomcat immediately using the persisted configuration
 
 ### Setup-only mode
 
@@ -264,20 +286,22 @@ curl -fk https://localhost:8443/ords/ || curl -f http://localhost:8080/ords/
 - Runs as non-root `oracle` user (UID 54321, group `oinstall` GID 54321)
 - Default Tomcat webapps removed (ROOT, docs, examples, manager, host-manager)
 - Tomcat shutdown port disabled (`-1`)
-- TLS enabled on port 8443 (TLSv1.3)
+- TLS available on port 8443 (TLSv1.3) when enabled
 - JVM heap set to 1024MB (Oracle recommended) via `setenv.sh`
 - Timezone set to UTC
 - Passwords stored in `.env` file (git-ignored)
+- Graceful shutdown handling (SIGTERM/SIGINT forwarded to Tomcat)
 
 ## Project Files
 
 | File | Description |
 |------|-------------|
 | `Dockerfile` | Multi-stage build (ORDS image + Tomcat base) |
-| `docker-compose.yml` | Compose config with volumes, network, TLS, healthcheck |
-| `entrypoint.sh` | DB wait, ORDS setup, init scripts, graceful shutdown |
-| `server.xml` | Custom Tomcat config with HTTP (8080) and HTTPS (8443) connectors |
-| `setenv.sh` | Tomcat JVM options (`-Dconfig.url`, heap, timezone, TLS password) |
+| `docker-compose.yml` | Compose config with volumes, network, healthcheck |
+| `entrypoint.sh` | TLS selection, DB wait, ORDS setup, init scripts, graceful shutdown |
+| `server-http.xml` | Tomcat config — HTTP only (port 8080) |
+| `server-tls.xml` | Tomcat config — HTTP (8080) + HTTPS (8443) |
+| `setenv.sh` | Tomcat JVM options (`-Dconfig.url`, heap, timezone) |
 | `buildContainerImage.sh` | Build helper with Docker/Podman detection and proxy support |
 | `generate-self-signed-cert.sh` | Creates a PKCS12 keystore with self-signed certificate |
 | `.env.example` | Template for environment variables (copy to `.env`) |
