@@ -3,7 +3,9 @@
 #   1. Accept Oracle Standard Terms at https://container-registry.oracle.com/ords/ocr/ba/database/ords
 #   2. docker login container-registry.oracle.com
 #   3. docker pull container-registry.oracle.com/database/ords:latest
-ARG ORDS_IMAGE=container-registry.oracle.com/database/ords:latest
+
+#ARG ORDS_IMAGE=container-registry.oracle.com/database/ords:latest
+ARG ORDS_IMAGE=ords
 FROM ${ORDS_IMAGE} AS ords-source
 
 # Stage 2: Build Tomcat + ORDS image
